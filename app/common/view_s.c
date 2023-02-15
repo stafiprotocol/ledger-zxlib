@@ -34,6 +34,7 @@ static bool exceed_pixel_in_display(const uint8_t length);
 
 void h_initialize();
 void account_enabled();
+void shortcut_enabled();
 
 static void h_expert_toggle();
 static void h_expert_update();
@@ -50,9 +51,25 @@ static void h_account_toggle();
 static void h_account_update();
 #endif
 
+#ifdef SHORTCUT_MODE_ENABLED
+static void h_shortcut_toggle();
+static void h_shortcut_update();
+#endif
+
+enum MAINMENU_SCREENS {
+    SCREEN_HOME = 0,
+    SCREEN_EXPERT,
+#ifdef APP_ACCOUNT_MODE_ENABLED
+    SCREEN_ACCOUNT,
+#endif
+#ifdef SHORTCUT_MODE_ENABLED
+    SCREEN_SHORTCUT,
+#endif
+};
+
 ux_state_t ux;
 extern ux_menu_state_t ux_menu;
-static unsigned int mustReply = 0;
+extern unsigned int review_type;
 
 void os_exit(uint32_t id) {
     (void)id;
@@ -65,6 +82,10 @@ const ux_menu_entry_t menu_main[] = {
 
 #ifdef APP_ACCOUNT_MODE_ENABLED
     {NULL, h_account_toggle, 0, &C_icon_app, "Account:", viewdata.value, 33, 12},
+#endif
+
+#ifdef SHORTCUT_MODE_ENABLED
+    {NULL, h_shortcut_toggle, 0, &C_icon_app, "Shortcut mode:", viewdata.value, 33, 12},
 #endif
 
     {NULL, NULL, 0, &C_icon_app, APPVERSION_LINE1, APPVERSION_LINE2, 33, 12},
@@ -83,9 +104,8 @@ const ux_menu_entry_t menu_main[] = {
 };
 
 const ux_menu_entry_t menu_initialize[] = {
-    {NULL, NULL, 0, &C_icon_app, MENU_MAIN_APP_LINE1, viewdata.key, 33, 12},
+    {NULL, NULL, 0, &C_icon_app, MENU_MAIN_APP_LINE1, "Not Ready", 33, 12},
     {NULL, h_initialize, 0, &C_icon_app, "Click to", "Initialize", 33, 12},
-    {NULL, h_expert_toggle, 0, &C_icon_app, "Expert mode:", viewdata.value, 33, 12},
     {NULL, NULL, 0, &C_icon_app, APPVERSION_LINE1, APPVERSION_LINE2, 33, 12},
     {NULL, NULL, 0, &C_icon_app, "Developed by:", "StaFi.io", 33, 12},
     {NULL, NULL, 0, &C_icon_app, "License: ", "Apache 2.0", 33, 12},
@@ -156,16 +176,21 @@ static unsigned int view_review_button(unsigned int button_mask, __Z_UNUSED unsi
 
 const bagl_element_t* idle_preprocessor(const ux_menu_entry_t* entry, bagl_element_t* element) {
     switch(ux_menu.current_entry) {
-        case 0:
+        case SCREEN_HOME:
             break;
-        case 1:
+        case SCREEN_EXPERT:
             h_expert_update();
             break;
-        case 2:
 #ifdef APP_ACCOUNT_MODE_ENABLED
+        case SCREEN_ACCOUNT:
             h_account_update();
-#endif
             break;
+#endif
+#ifdef SHORTCUT_MODE_ENABLED
+        case SCREEN_SHORTCUT:
+            h_shortcut_update();
+            break;
+#endif
         default:
             break;
     }
@@ -178,13 +203,19 @@ const bagl_element_t *view_prepro(const bagl_element_t *element) {
             if (!h_paging_can_decrease()){
                 return NULL;
             }
-            UX_CALLBACK_SET_INTERVAL(2000);
+            UX_CALLBACK_SET_INTERVAL(2000)
             break;
         case UIID_ICONRIGHT:
             if (!h_paging_can_increase()){
                 return NULL;
             }
-            UX_CALLBACK_SET_INTERVAL(2000);
+            UX_CALLBACK_SET_INTERVAL(2000)
+            break;
+        case UIID_ICONREVIEW:
+            if (!h_paging_intro_screen()){
+                return NULL;
+            }
+            UX_CALLBACK_SET_INTERVAL(2000)
             break;
         case UIID_LABELSCROLL:
             UX_CALLBACK_SET_INTERVAL(
@@ -208,7 +239,7 @@ void h_review_update() {
     zxerr_t err = h_review_update_data();
     switch(err) {
         case zxerr_ok:
-            UX_DISPLAY(view_review, view_prepro);
+            UX_DISPLAY(view_review, view_prepro)
             break;
         default:
             view_error_show();
@@ -231,7 +262,7 @@ void h_review_button_right() {
 
 void h_review_button_both() {
     zemu_log_stack("h_review_button_both");
-    h_review_action(mustReply);
+    h_review_action(review_type);
 }
 
 //////////////////////////
@@ -266,11 +297,11 @@ void view_idle_show_impl(uint8_t item_idx, char *statusString) {
 void view_message_impl(char *title, char *message) {
     snprintf(viewdata.key, MAX_CHARS_PER_VALUE_LINE, "%s", title);
     snprintf(viewdata.value, MAX_CHARS_PER_VALUE_LINE, "%s", message);
-    UX_DISPLAY(view_message, view_prepro_idle);
+    UX_DISPLAY(view_message, view_prepro_idle)
 }
 
 void view_error_show_impl() {
-    UX_DISPLAY(view_error, view_prepro);
+    UX_DISPLAY(view_error, view_prepro)
 }
 
 void h_expert_toggle() {
@@ -302,6 +333,24 @@ void h_account_update() {
 }
 #endif
 
+#ifdef SHORTCUT_MODE_ENABLED
+void h_shortcut_toggle() {
+    if (app_mode_expert() && !app_mode_shortcut()) {
+        shortcut_enabled();
+        return;
+    }
+    app_mode_set_shortcut(0);
+    view_idle_show(SCREEN_SHORTCUT, NULL);
+}
+
+void h_shortcut_update() {
+    snprintf(viewdata.value, MAX_CHARS_PER_VALUE1_LINE, "disabled");
+    if (app_mode_shortcut()) {
+        snprintf(viewdata.value, MAX_CHARS_PER_VALUE1_LINE, "enabled");
+    }
+}
+#endif
+
 #ifdef APP_SECRET_MODE_ENABLED
 void h_secret_click() {
     if (COIN_SECRET_REQUIRED_CLICKS == 0) {
@@ -324,14 +373,14 @@ void h_secret_click() {
 
 void view_review_show_impl(unsigned int requireReply) {
     zemu_log_stack("view_review_show_impl");
-    mustReply = requireReply;
+    review_type = requireReply;
 
     h_paging_init();
 
     zxerr_t err = h_review_update_data();
     switch(err) {
         case zxerr_ok:
-            UX_DISPLAY(view_review, view_prepro);
+            UX_DISPLAY(view_review, view_prepro)
             break;
         default:
             view_error_show();
@@ -341,7 +390,7 @@ void view_review_show_impl(unsigned int requireReply) {
 
 void splitValueField() {
     print_value2("");
-    const uint16_t vlen = strlen(viewdata.value);
+    const uint16_t vlen = (uint16_t) strnlen(viewdata.value, MAX_CHARS_PER_VALUE1_LINE);
     if (vlen > MAX_CHARS_PER_VALUE2_LINE - 1) {
         snprintf(viewdata.value2, MAX_CHARS_PER_VALUE2_LINE, "%s", viewdata.value + MAX_CHARS_PER_VALUE_LINE);
         viewdata.value[MAX_CHARS_PER_VALUE_LINE] = 0;
@@ -354,7 +403,7 @@ void splitValueAddress() {
         exceeding_max = exceed_pixel_in_display(len);
     }
     print_value2("");
-    const uint16_t vlen = strlen(viewdata.value);
+    const uint16_t vlen = (uint16_t) strnlen(viewdata.value, MAX_CHARS_PER_VALUE1_LINE);
     //if viewdata.value == NULL --> len = 0
     if (vlen > len && len > 0) {
         snprintf(viewdata.value2, MAX_CHARS_PER_VALUE2_LINE, "%s", viewdata.value + len);
